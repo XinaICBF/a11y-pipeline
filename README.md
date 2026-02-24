@@ -3,10 +3,10 @@
 Minimal accessibility (a11y) pipeline driven by `task.ini`.
 
 Quick overview
-- Quick overview
-- Crawl pages from `base_url` and write `inputs/urls.json` (user-provided or produced by crawl).
+- Crawl pages and write `inputs/urls.json` (user-provided or produced by crawl).
 - Snapshot pages to `output/dom/*.html`.
-- Filter axe results to `output/filtered/*.json`.
+- Run axe accessibility scans and save raw JSON to `output/raw/*.json`.
+- Filter and aggregate results to `output/filtered/*.json`.
 - Generate an HTML report at `output/report/index.html`.
 
 Prerequisites
@@ -14,40 +14,59 @@ Prerequisites
 - npm
 
 Install
-```bash
+```powershell
 npm install
 npm run pw:install    # downloads Playwright browsers
 ```
 
 Usage
 - Run the next pending task from `task.ini`:
-```bash
+```powershell
 npm run run
 ```
 - Run the entire pipeline (all tasks):
-```bash
+```powershell
 npm run run:all
 ```
 - Reset all tasks to `pending`:
-```bash
+```powershell
 npm run reset
 ```
 
-Configuration (`task.ini`)
-- Edit `task.ini` to control `base_url`, task order/status, and per-task options.
-- The runner reads the first task with `status = pending` or `running` and executes only that one (unless `--all` is passed).
+Files & outputs
+- `inputs/urls.json`: canonical URL list used for snapshotting (gitignored).
+- `output/dom/`: saved HTML snapshots.
+- `output/raw/`: raw axe JSON results per page.
+- `output/filtered/`: filtered/aggregated JSON results per page.
+- `output/report/index.html`: final HTML report.
 
-- `inputs/urls.json` — input URL list (user-provided or produced by crawl)
-- Outputs
-- `inputs/urls.json` — input URL list (user-provided or produced by crawl)
-- `output/dom/*.html` — page snapshots
-- `output/dom/*.html` — page snapshots
-- `output/raw/*.json` — raw axe results
-- `output/filtered/*.json` — filtered, aggregated violations
-- `output/report/index.html` — final HTML report
+Key environment variables & flags
+- `A11Y_SHOW=true` : run browsers in headful mode (useful for debugging).
+- `A11Y_USER`, `A11Y_PASS`, `A11Y_LOGIN_URL` : credentials and login page URL used by the crawler and `axe-scan` to perform a best-effort login.
+- `A11Y_URLS` or `A11Y_EXTRA_PATHS` : comma-separated list of paths to snapshot (relative to `base_url` in `task.ini`).
+- `A11Y_CLEAN=true` or `--clean` : remove the previous `output/` directory before running.
+- `A11Y_USE_SNAPSHOTS=true` : instruct `axe-scan` to use saved snapshots from `output/dom/` instead of navigating live.
+- `A11Y_INCLUDE_ALL=true` or `--include-all` : tell the `filter` step to include all violations (do not filter by WCAG tags).
 
-Notes
-- Scripts live in `scripts/` and are TypeScript files. The runner uses ts-node to execute them; a few tasks were inlined in `run-task.ts` to avoid environment/loader issues.
-- If a script fails, check `task.ini` and the JSON outputs under `output/` for details.
+Filter CLI
+- Run only the filter step and include all violations:
+```powershell
+$env:A11Y_INCLUDE_ALL='true'; node --loader ts-node/esm scripts/filter.ts --include-all
+```
 
-File: [a11y-pipeline/task.ini](task.ini)
+Debugging `axe-scan`
+- Run `axe-scan` under the Node inspector (ts-node ESM loader):
+```powershell
+npm run axe:debug
+```
+
+Orchestrator & behavior
+- `run-task.ts` reads `task.ini` and runs tasks in this order: `crawl`, `snapshot`, `axe_scan`, `filter`, `report`.
+- `crawl` now takes a pre-login snapshot, attempts a best-effort login when credentials are provided, snapshots the requested URL list, and writes `inputs/urls.json` (so the input list survives `--clean`).
+- The `filter` step by default filters violations by WCAG tags: level `AA` keeps `wcag2aa` and level `A` keeps `wcag2a`. Use `A11Y_INCLUDE_ALL` / `--include-all` to disable tag-based filtering.
+
+Notes & security
+- `inputs/urls.json` is intentionally gitignored to avoid committing sensitive URLs or site-specific paths.
+- Login automation is best-effort and uses common selectors; customize if your site uses a non-standard flow.
+
+If you want more examples (task.ini snippets, sample `A11Y_URLS`, or expanded reporting options), tell me what to add.
