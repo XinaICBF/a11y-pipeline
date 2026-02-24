@@ -1,0 +1,21 @@
+{
+  "name": "a11y-pipeline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "run": "node --loader ts-node/esm run-task.ts",
+    "run:all": "node --loader ts-node/esm run-task.ts --all",
+    "reset": "node --loader ts-node/esm run-task.ts --reset",
+    "pw:install": "npx playwright install --with-deps"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "ini": "^4.1.1",
+    "playwright": "^1.52.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.4.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

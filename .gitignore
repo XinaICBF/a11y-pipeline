@@ -1,0 +1,38 @@
+# Node modules
+node_modules/
+
+# Output and generated reports
+output/
+playwright-report/
+playwright-report-*/
+.playwright/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor directories
+.vscode/
+.idea/
+
+# TypeScript
+dist/
+build/
+
+# Coverage
+.nyc_output/
+coverage/
+
+# Lockfiles (keep package-lock.json committed if you prefer; uncomment to ignore)
+# package-lock.json
