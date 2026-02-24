@@ -61,7 +61,7 @@ function findNextPending(cfg: any): TaskName | null {
 
 function scriptsMap(task: TaskName) {
   return path.resolve("scripts", `${task === "axe_scan" ? "axe-scan" : task}.ts`);
-}
+  }
 
 async function runCrawlInline() {
   const iniPath = path.resolve("task.ini");
@@ -126,6 +126,45 @@ async function runCrawlInline() {
   console.log(`Wrote ${discovered.length} urls to ${outPath}`);
 }
 
+async function runSnapshotInline() {
+  const iniPath = path.resolve("task.ini");
+  const raw = fs.readFileSync(iniPath, "utf-8");
+  const cfg = ini.parse(raw) as Record<string, any>;
+  const outputDir = path.resolve(String(cfg.global?.output_dir ?? "./output"));
+  const waitStrategy = String(cfg.task?.snapshot?.wait_strategy ?? "networkidle");
+
+  const urlsPath = path.join(outputDir, "urls.json");
+  if (!fs.existsSync(urlsPath)) throw new Error("Missing output/urls.json. Run crawl first.");
+
+  const { urls } = JSON.parse(fs.readFileSync(urlsPath, "utf-8")) as { urls: string[] };
+
+  const domDir = path.join(outputDir, "dom");
+  ensureDir(domDir);
+
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+
+  const crypto = await import("node:crypto");
+  const sha1 = (s: string) => crypto.createHash("sha1").update(s).digest("hex");
+
+  for (const url of urls) {
+    const id = sha1(url);
+    const outFile = path.join(domDir, `${id}.html`);
+    try {
+      await page.goto(url, { waitUntil: waitStrategy as any, timeout: 45000 });
+      const html = await page.content();
+      fs.writeFileSync(outFile, html, "utf-8");
+      console.log(`Snapshot: ${url} -> ${path.relative(process.cwd(), outFile)}`);
+    } catch (e) {
+      fs.writeFileSync(outFile, `<!-- SNAPSHOT FAILED: ${url} -->\n`, "utf-8");
+      console.log(`Snapshot failed: ${url}`);
+    }
+  }
+
+  await browser.close();
+}
+
 async function main() {
   const args = new Set(process.argv.slice(2));
   const cfg = readIni();
@@ -155,6 +194,8 @@ async function main() {
     try {
       if (next === "crawl") {
         await runCrawlInline();
+      } else if (next === "snapshot") {
+        await runSnapshotInline();
       } else {
         await runNodeScript(scriptsMap(next));
       }

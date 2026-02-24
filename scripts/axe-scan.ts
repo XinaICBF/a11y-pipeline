@@ -40,7 +40,8 @@ async function main() {
   ensureDir(rawDir);
 
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const context = await browser.newContext();
+  const page = await context.newPage();
 
   for (const url of urls) {
     const id = sha1(url);
@@ -75,6 +76,7 @@ async function main() {
     }
   }
 
+  await context.close();
   await browser.close();
 }
 
