@@ -60,7 +60,7 @@ function findNextPending(cfg: any): TaskName | null {
 }
 
 function scriptsMap(task: TaskName) {
-  return path.resolve("..", "scripts", `${task === "axe_scan" ? "axe-scan" : task}.ts`);
+  return path.resolve("scripts", `${task === "axe_scan" ? "axe-scan" : task}.ts`);
 }
 
 async function runCrawlInline() {
