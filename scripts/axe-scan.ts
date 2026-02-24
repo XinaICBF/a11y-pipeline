@@ -95,19 +95,46 @@ async function main() {
           for (const s of submitSelectors) {
             const el = await page.$(s);
             if (el) {
-              await el.click();
+              const beforeUrl = page.url();
+              await Promise.all([
+                el.click(),
+                // wait for navigation or timeout
+                (async () => {
+                  try {
+                    await page.waitForNavigation({ timeout: 5000 });
+                  } catch {}
+                })()
+              ]);
+              const afterUrl = page.url();
+              if (afterUrl !== beforeUrl) {
+                console.log(`Axe-scan: auth appears successful (redirected ${beforeUrl} -> ${afterUrl}).`);
+              } else {
+                console.log(`Axe-scan: click performed but no redirect detected (still ${afterUrl}).`);
+              }
               clicked = true;
               break;
             }
           }
           if (!clicked) {
             const special = await page.$('button.agnav-login-btn');
-            if (special) await special.click();
+            if (special) {
+              const beforeUrl = page.url();
+              await Promise.all([
+                special.click(),
+                (async () => {
+                  try {
+                    await page.waitForNavigation({ timeout: 5000 });
+                  } catch {}
+                })()
+              ]);
+              const afterUrl = page.url();
+              if (afterUrl !== beforeUrl) {
+                console.log(`Axe-scan: auth appears successful (redirected ${beforeUrl} -> ${afterUrl}).`);
+              } else {
+                console.log(`Axe-scan: special login clicked but no redirect detected (still ${afterUrl}).`);
+              }
+            }
           }
-          try {
-            await page.waitForLoadState('networkidle', { timeout: 10000 });
-          } catch {}
-          console.log('Axe-scan: auth attempt completed (credentials used from env).');
         } else {
           console.log('Axe-scan: auth skipped, login form fields not found.');
         }

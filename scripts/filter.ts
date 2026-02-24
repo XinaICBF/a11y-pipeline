@@ -58,12 +58,21 @@ async function main() {
     const results = data.results;
     const violations: AxeViolation[] = results?.violations ?? [];
 
+    const includeAllEnv = String(process.env.A11Y_INCLUDE_ALL ?? "").toLowerCase() === "true";
+    const includeAllArg = process.argv.includes("--include-all");
+    const includeAll = includeAllEnv || includeAllArg;
+
     let filtered: AxeViolation[] = violations;
 
-    if (level === "AA") {
-      filtered = violations.filter((v) => (v.tags ?? []).includes("wcag2aa"));
-    } else if (level === "A") {
-      filtered = violations.filter((v) => (v.tags ?? []).includes("wcag2a"));
+    if (!includeAll) {
+      if (level === "AA") {
+        filtered = violations.filter((v) => (v.tags ?? []).includes("wcag2aa"));
+      } else if (level === "A") {
+        filtered = violations.filter((v) => (v.tags ?? []).includes("wcag2a"));
+      }
+    } else {
+      // when including all, keep the full violations set
+      filtered = violations;
     }
 
     // sort by impact desc, then id
