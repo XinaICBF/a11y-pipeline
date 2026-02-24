@@ -65,6 +65,10 @@ Orchestrator & behavior
 - `crawl` now takes a pre-login snapshot, attempts a best-effort login when credentials are provided, snapshots the requested URL list, and writes `inputs/urls.json` (so the input list survives `--clean`).
 - The `filter` step by default filters violations by WCAG tags: level `AA` keeps `wcag2aa` and level `A` keeps `wcag2a`. Use `A11Y_INCLUDE_ALL` / `--include-all` to disable tag-based filtering.
 
+Post-run behavior
+- After the orchestrator completes a run it automatically resets the last three tasks so the pipeline will start at `axe_scan` on the next invocation. Concretely, `task.axe_scan`, `task.filter`, and `task.report` are set to `pending` when the run finishes. This keeps the pipeline ready to re-run scans and report generation without re-running crawl/snapshot steps.
+- If you prefer this to be optional, change the behavior in `run-task.ts` (search for the "Reset tasks" comment) or ask me to add a configuration toggle.
+
 Notes & security
 - `inputs/urls.json` is intentionally gitignored to avoid committing sensitive URLs or site-specific paths.
 - Login automation is best-effort and uses common selectors; customize if your site uses a non-standard flow.
