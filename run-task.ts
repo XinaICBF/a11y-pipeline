@@ -74,9 +74,17 @@ async function runCrawlInline() {
   ensureDir(outputDir);
 
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const show = (process.env.A11Y_SHOW ?? "").toLowerCase() === "true" || process.env.A11Y_SHOW === "1";
+  const launchOpts: any = { headless: !show };
+  if (show) {
+    launchOpts.channel = "chrome"; // use installed Chrome
+    launchOpts.devtools = true;
+    launchOpts.slowMo = 50;
+  }
+  const browser = await chromium.launch(launchOpts);
   const page = await browser.newPage();
 
+  // prepare crawl queue and helpers early so auth can seed additional links
   const queue: string[] = [baseUrl];
   const visited = new Set<string>();
   const discovered: string[] = [];
@@ -89,6 +97,142 @@ async function runCrawlInline() {
 
   function isSameOrigin(base: string, target: string) {
     return new URL(base).origin === new URL(target).origin;
+  }
+
+  // If environment credentials are provided, attempt to authenticate once
+  const envUser = process.env.A11Y_USER;
+  const envPass = process.env.A11Y_PASS;
+  if (envUser && envPass) {
+    try {
+      const loginUrl = String(process.env.A11Y_LOGIN_URL ?? baseUrl);
+      await page.goto(loginUrl, { waitUntil: "networkidle", timeout: 20000 });
+
+      // Try to open an explicit login page/modal if present
+      const loginTriggers = [
+        'a[href*="/login"]',
+        'a[href*="login"]',
+        'a[href*="/signin"]',
+        'a[href*="signin"]',
+        'button[id*=login]',
+        'button[class*=login]',
+        'a[class*=login]',
+        'text=Login',
+        'text=Sign in'
+      ];
+      for (const t of loginTriggers) {
+        try {
+          const el = await page.$(t);
+          if (el) {
+            await el.click();
+            // allow UI to update
+            try {
+              await page.waitForLoadState('networkidle', { timeout: 5000 });
+            } catch {}
+            break;
+          }
+        } catch {}
+      }
+
+      const userSelectors = [
+        'input[type="email"]',
+        'input[name="email"]',
+        'input[name="username"]',
+        'input[name="user"]',
+        'input[id*=user]'
+      ];
+      const passSelectors = [
+        'input[type="password"]',
+        'input[name="password"]',
+        'input[id*=pass]'
+      ];
+
+      let userSel: string | null = null;
+      for (const s of userSelectors) {
+        try {
+          await page.waitForSelector(s, { timeout: 3000 });
+          userSel = s;
+          break;
+        } catch {
+          continue;
+        }
+      }
+
+      let passSel: string | null = null;
+      for (const s of passSelectors) {
+        try {
+          await page.waitForSelector(s, { timeout: 3000 });
+          passSel = s;
+          break;
+        } catch {
+          continue;
+        }
+      }
+
+      if (userSel && passSel) {
+        await page.fill(userSel, envUser);
+        await page.fill(passSel, envPass);
+
+        const submitSelectors = ['button[type=submit]', 'input[type=submit]', 'button[id*=login]', 'button[class*=login]'];
+        let clicked = false;
+        for (const s of submitSelectors) {
+          const el = await page.$(s);
+          if (el) {
+            await el.click();
+            clicked = true;
+            break;
+          }
+        }
+        // ensure we click the app-specific login button if present
+        if (!clicked) {
+          const special = await page.$('button.agnav-login-btn');
+          if (special) {
+            await special.click();
+            clicked = true;
+          }
+        }
+        if (!clicked) {
+          // fallback: press Enter in password field
+          await page.press(passSel, 'Enter');
+        }
+
+        // allow time for navigation/auth
+        try {
+          await page.waitForLoadState('networkidle', { timeout: 10000 });
+        } catch {}
+
+        console.log('Auth attempt completed (credentials used from env).');
+        // collect post-login links to seed the crawl queue
+        try {
+          const postLinks: string[] = await page.$$eval('a[href]', (els: any) =>
+            els.map((a: any) => (a as HTMLAnchorElement).href).filter(Boolean)
+          );
+          for (const l of postLinks) {
+            try {
+              const n = normalizeUrl(l);
+              if (isSameOrigin(baseUrl, n) && !visited.has(n)) {
+                queue.push(n);
+              }
+            } catch {}
+          }
+        } catch {}
+
+        // also explicitly visit common app pages provided by user if same origin
+        const extraPaths = process.env.A11Y_EXTRA_PATHS
+          ? String(process.env.A11Y_EXTRA_PATHS).split(",").map((p) => p.trim()).filter(Boolean)
+          : ["/home", "/advisor-dashboard", "/programme", "/organisation"];
+        for (const p of extraPaths) {
+          try {
+            const full = new URL(p, loginUrl).toString();
+            const n = normalizeUrl(full);
+            if (isSameOrigin(baseUrl, n) && !visited.has(n)) queue.push(n);
+          } catch {}
+        }
+      } else {
+        console.log('Auth skipped: login form fields not found.');
+      }
+    } catch (e) {
+      console.log('Auth attempt failed:', String((e as any)?.message ?? e));
+    }
   }
 
   while (queue.length > 0 && discovered.length < maxPages) {
@@ -142,7 +286,14 @@ async function runSnapshotInline() {
   ensureDir(domDir);
 
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const show = (process.env.A11Y_SHOW ?? "").toLowerCase() === "true" || process.env.A11Y_SHOW === "1";
+  const launchOpts: any = { headless: !show };
+  if (show) {
+    launchOpts.channel = "chrome";
+    launchOpts.devtools = true;
+    launchOpts.slowMo = 50;
+  }
+  const browser = await chromium.launch(launchOpts);
   const page = await browser.newPage();
 
   const crypto = await import("node:crypto");
@@ -178,7 +329,8 @@ async function main() {
     return;
   }
 
-  const runAll = args.has("--all");
+  let runAll = args.has("--all");
+  const autoAfterCrawl = Boolean(cfg.global?.auto_run_after_crawl);
 
   while (true) {
     const next = findNextPending(cfg);
@@ -202,6 +354,10 @@ async function main() {
       cfg.task[next].status = "done";
       writeIni(cfg);
       console.log(`=== Task done: ${next} ===`);
+      // If user requested auto-run after crawl, enable running remaining tasks
+      if (next === "crawl" && autoAfterCrawl) {
+        runAll = true;
+      }
     } catch (e: any) {
       cfg.task[next].status = "failed";
       writeIni(cfg);
