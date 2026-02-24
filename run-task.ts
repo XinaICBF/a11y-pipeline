@@ -323,6 +323,18 @@ async function main() {
 
     if (!runAll) break;
   }
+
+  // After finishing the run, always reset the last three tasks so
+  // the pipeline will start at `axe_scan` on the next run.
+  try {
+    setStatus(cfg, "axe_scan", "pending");
+    setStatus(cfg, "filter", "pending");
+    setStatus(cfg, "report", "pending");
+    writeIni(cfg);
+    console.log("Reset tasks: axe_scan, filter, report -> pending");
+  } catch (e) {
+    // non-fatal
+  }
 }
 
 main().catch((e) => {
