@@ -69,70 +69,44 @@ async function runCrawlInline() {
   const cfg = ini.parse(raw) as Record<string, any>;
   const baseUrl = String(cfg.global?.base_url ?? "").trim();
   const outputDir = path.resolve(String(cfg.global?.output_dir ?? "./output"));
-  const maxPages = Number(cfg.task?.crawl?.max_pages ?? 20);
 
   ensureDir(outputDir);
+  const domDir = path.join(outputDir, "dom");
+  ensureDir(domDir);
 
   const { chromium } = await import("playwright");
   const show = (process.env.A11Y_SHOW ?? "").toLowerCase() === "true" || process.env.A11Y_SHOW === "1";
   const launchOpts: any = { headless: !show };
   if (show) {
-    launchOpts.channel = "chrome"; // use installed Chrome
+    launchOpts.channel = "chrome";
     launchOpts.devtools = true;
     launchOpts.slowMo = 50;
   }
   const browser = await chromium.launch(launchOpts);
   const page = await browser.newPage();
 
-  // prepare crawl queue and helpers early so auth can seed additional links
-  const queue: string[] = [baseUrl];
-  const visited = new Set<string>();
-  const discovered: string[] = [];
+  const crypto = await import("node:crypto");
+  const sha1 = (s: string) => crypto.createHash("sha1").update(s).digest("hex");
 
-  function normalizeUrl(u: string) {
-    const url = new URL(u);
-    url.hash = "";
-    return url.toString();
+  // First: open the login page (or base) and take a pre-login snapshot
+  const loginUrl = String(process.env.A11Y_LOGIN_URL ?? baseUrl);
+  try {
+    await page.goto(loginUrl, { waitUntil: "networkidle", timeout: 20000 });
+    const loginHtml = await page.content();
+    const loginId = sha1(loginUrl);
+    const loginOut = path.join(domDir, `${loginId}.html`);
+    fs.writeFileSync(loginOut, loginHtml, "utf-8");
+    console.log(`Login snapshot: ${loginUrl} -> ${path.relative(process.cwd(), loginOut)}`);
+  } catch (e) {
+    console.log(`Login snapshot failed: ${String((e as any)?.message ?? e)}`);
   }
 
-  function isSameOrigin(base: string, target: string) {
-    return new URL(base).origin === new URL(target).origin;
-  }
-
-  // If environment credentials are provided, attempt to authenticate once
+  // Attempt auth if credentials provided
   const envUser = process.env.A11Y_USER;
   const envPass = process.env.A11Y_PASS;
   if (envUser && envPass) {
     try {
-      const loginUrl = String(process.env.A11Y_LOGIN_URL ?? baseUrl);
-      await page.goto(loginUrl, { waitUntil: "networkidle", timeout: 20000 });
-
-      // Try to open an explicit login page/modal if present
-      const loginTriggers = [
-        'a[href*="/login"]',
-        'a[href*="login"]',
-        'a[href*="/signin"]',
-        'a[href*="signin"]',
-        'button[id*=login]',
-        'button[class*=login]',
-        'a[class*=login]',
-        'text=Login',
-        'text=Sign in'
-      ];
-      for (const t of loginTriggers) {
-        try {
-          const el = await page.$(t);
-          if (el) {
-            await el.click();
-            // allow UI to update
-            try {
-              await page.waitForLoadState('networkidle', { timeout: 5000 });
-            } catch {}
-            break;
-          }
-        } catch {}
-      }
-
+      // attempt to find and fill login form fields (best-effort)
       const userSelectors = [
         'input[type="email"]',
         'input[name="email"]',
@@ -140,38 +114,30 @@ async function runCrawlInline() {
         'input[name="user"]',
         'input[id*=user]'
       ];
-      const passSelectors = [
-        'input[type="password"]',
-        'input[name="password"]',
-        'input[id*=pass]'
-      ];
+      const passSelectors = ['input[type="password"]', 'input[name="password"]', 'input[id*=pass]'];
 
       let userSel: string | null = null;
       for (const s of userSelectors) {
         try {
-          await page.waitForSelector(s, { timeout: 3000 });
+          await page.waitForSelector(s, { timeout: 2000 });
           userSel = s;
           break;
-        } catch {
-          continue;
-        }
+        } catch {}
       }
 
       let passSel: string | null = null;
       for (const s of passSelectors) {
         try {
-          await page.waitForSelector(s, { timeout: 3000 });
+          await page.waitForSelector(s, { timeout: 2000 });
           passSel = s;
           break;
-        } catch {
-          continue;
-        }
+        } catch {}
       }
 
       if (userSel && passSel) {
         await page.fill(userSel, envUser);
         await page.fill(passSel, envPass);
-
+        // try common submit buttons
         const submitSelectors = ['button[type=submit]', 'input[type=submit]', 'button[id*=login]', 'button[class*=login]'];
         let clicked = false;
         for (const s of submitSelectors) {
@@ -182,51 +148,14 @@ async function runCrawlInline() {
             break;
           }
         }
-        // ensure we click the app-specific login button if present
         if (!clicked) {
           const special = await page.$('button.agnav-login-btn');
-          if (special) {
-            await special.click();
-            clicked = true;
-          }
+          if (special) await special.click();
         }
-        if (!clicked) {
-          // fallback: press Enter in password field
-          await page.press(passSel, 'Enter');
-        }
-
-        // allow time for navigation/auth
         try {
           await page.waitForLoadState('networkidle', { timeout: 10000 });
         } catch {}
-
         console.log('Auth attempt completed (credentials used from env).');
-        // collect post-login links to seed the crawl queue
-        try {
-          const postLinks: string[] = await page.$$eval('a[href]', (els: any) =>
-            els.map((a: any) => (a as HTMLAnchorElement).href).filter(Boolean)
-          );
-          for (const l of postLinks) {
-            try {
-              const n = normalizeUrl(l);
-              if (isSameOrigin(baseUrl, n) && !visited.has(n)) {
-                queue.push(n);
-              }
-            } catch {}
-          }
-        } catch {}
-
-        // also explicitly visit common app pages provided by user if same origin
-        const extraPaths = process.env.A11Y_EXTRA_PATHS
-          ? String(process.env.A11Y_EXTRA_PATHS).split(",").map((p) => p.trim()).filter(Boolean)
-          : ["/home", "/advisor-dashboard", "/programme", "/organisation"];
-        for (const p of extraPaths) {
-          try {
-            const full = new URL(p, loginUrl).toString();
-            const n = normalizeUrl(full);
-            if (isSameOrigin(baseUrl, n) && !visited.has(n)) queue.push(n);
-          } catch {}
-        }
       } else {
         console.log('Auth skipped: login form fields not found.');
       }
@@ -235,39 +164,54 @@ async function runCrawlInline() {
     }
   }
 
-  while (queue.length > 0 && discovered.length < maxPages) {
-    const current = normalizeUrl(queue.shift()!);
-    if (visited.has(current)) continue;
-    visited.add(current);
-
+  // After login, use only the user-specified URL list for snapshotting.
+  // Read URLs from env var `A11Y_URLS` (comma-separated) or fallback to defaults.
+  const rawList = process.env.A11Y_URLS ?? process.env.A11Y_EXTRA_PATHS ?? "/home,/advisor-dashboard,/programme,/organisation";
+  const parts = String(rawList).split(",").map((p) => p.trim()).filter(Boolean);
+  const urls: string[] = [];
+  for (const p of parts) {
     try {
-      await page.goto(current, { waitUntil: "domcontentloaded", timeout: 30000 });
-      discovered.push(current);
-
-      const links = await page.$$eval("a[href]", (els: any) =>
-        els
-          .map((a: any) => a.href)
-          .filter((h: any) => typeof h === "string" && h.length > 0)
-      );
-
-      for (const l of links) {
-        const n = normalizeUrl(l);
-        if (!isSameOrigin(baseUrl, n)) continue;
-        if (visited.has(n)) continue;
-        const proto = new URL(n).protocol;
-        if (proto !== "http:" && proto !== "https:") continue;
-        queue.push(n);
-      }
+      const full = new URL(p, baseUrl).toString();
+      urls.push(full);
     } catch {
-      discovered.push(current);
+      // ignore
+    }
+  }
+
+  const captured: string[] = [];
+  for (const url of urls) {
+    const id = sha1(url);
+    const outFile = path.join(domDir, `${id}.html`);
+    try {
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 45000 });
+      const html = await page.content();
+      fs.writeFileSync(outFile, html, 'utf-8');
+      console.log(`Snapshot: ${url} -> ${path.relative(process.cwd(), outFile)}`);
+      captured.push(url);
+    } catch (e) {
+      fs.writeFileSync(outFile, `<!-- SNAPSHOT FAILED: ${url} -->\n`, 'utf-8');
+      console.log(`Snapshot failed: ${url}`);
+      captured.push(url);
     }
   }
 
   await browser.close();
 
-  const outPath = path.join(outputDir, "urls.json");
-  fs.writeFileSync(outPath, JSON.stringify({ baseUrl, urls: discovered }, null, 2), "utf-8");
-  console.log(`Wrote ${discovered.length} urls to ${outPath}`);
+  // write urls.json with the user-provided list (captured) to inputs/ (not output/)
+  const inputsDir = path.resolve("inputs");
+  ensureDir(inputsDir);
+  const outPath = path.join(inputsDir, "urls.json");
+  fs.writeFileSync(outPath, JSON.stringify({ baseUrl, urls: captured }, null, 2), "utf-8");
+  console.log(`Wrote ${captured.length} urls to ${outPath}`);
+
+  // mark snapshot task done so the separate snapshot step is skipped
+  try {
+    const cfg2 = ini.parse(fs.readFileSync(iniPath, 'utf-8')) as Record<string, any>;
+    cfg2.task = cfg2.task ?? {};
+    cfg2.task.snapshot = cfg2.task.snapshot ?? {};
+    cfg2.task.snapshot.status = 'done';
+    fs.writeFileSync(iniPath, ini.stringify(cfg2), 'utf-8');
+  } catch {}
 }
 
 async function runSnapshotInline() {
@@ -277,8 +221,9 @@ async function runSnapshotInline() {
   const outputDir = path.resolve(String(cfg.global?.output_dir ?? "./output"));
   const waitStrategy = String(cfg.task?.snapshot?.wait_strategy ?? "networkidle");
 
-  const urlsPath = path.join(outputDir, "urls.json");
-  if (!fs.existsSync(urlsPath)) throw new Error("Missing output/urls.json. Run crawl first.");
+  const inputsDir = path.resolve("inputs");
+  const urlsPath = path.join(inputsDir, "urls.json");
+  if (!fs.existsSync(urlsPath)) throw new Error("Missing inputs/urls.json. Provide URL list or run crawl first.");
 
   const { urls } = JSON.parse(fs.readFileSync(urlsPath, "utf-8")) as { urls: string[] };
 
@@ -320,6 +265,16 @@ async function main() {
   const args = new Set(process.argv.slice(2));
   const cfg = readIni();
   const { outputDir } = getGlobal(cfg);
+  // If requested, remove previous output before proceeding.
+  const shouldClean = args.has("--clean") || (String(process.env.A11Y_CLEAN ?? "").toLowerCase() === "true");
+  if (shouldClean) {
+    try {
+      fs.rmSync(outputDir, { recursive: true, force: true });
+      console.log(`Removed previous output directory: ${outputDir}`);
+    } catch (e) {
+      console.log(`Failed to clean output directory: ${String((e as any)?.message ?? e)}`);
+    }
+  }
   ensureDir(outputDir);
 
   if (args.has("--reset")) {

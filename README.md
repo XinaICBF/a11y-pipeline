@@ -3,9 +3,9 @@
 Minimal accessibility (a11y) pipeline driven by `task.ini`.
 
 Quick overview
-- Crawl pages from `base_url` and write `output/urls.json`.
+- Quick overview
+- Crawl pages from `base_url` and write `inputs/urls.json` (user-provided or produced by crawl).
 - Snapshot pages to `output/dom/*.html`.
-- Run axe accessibility scans to `output/raw/*.json`.
 - Filter axe results to `output/filtered/*.json`.
 - Generate an HTML report at `output/report/index.html`.
 
@@ -37,8 +37,10 @@ Configuration (`task.ini`)
 - Edit `task.ini` to control `base_url`, task order/status, and per-task options.
 - The runner reads the first task with `status = pending` or `running` and executes only that one (unless `--all` is passed).
 
-Outputs
-- `output/urls.json` — discovered URLs (from crawl)
+- `inputs/urls.json` — input URL list (user-provided or produced by crawl)
+- Outputs
+- `inputs/urls.json` — input URL list (user-provided or produced by crawl)
+- `output/dom/*.html` — page snapshots
 - `output/dom/*.html` — page snapshots
 - `output/raw/*.json` — raw axe results
 - `output/filtered/*.json` — filtered, aggregated violations

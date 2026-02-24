@@ -36,3 +36,6 @@ coverage/
 
 # Lockfiles (keep package-lock.json committed if you prefer; uncomment to ignore)
 # package-lock.json
+
+# Inputs (sensitive)
+inputs/urls.json

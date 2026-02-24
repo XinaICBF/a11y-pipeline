@@ -23,8 +23,9 @@ async function main() {
   const outputDir = path.resolve(String(cfg.global?.output_dir ?? "./output"));
   const waitStrategy = String(cfg["task.snapshot"]?.wait_strategy ?? "networkidle");
 
-  const urlsPath = path.join(outputDir, "urls.json");
-  if (!fs.existsSync(urlsPath)) throw new Error("Missing output/urls.json. Run crawl first.");
+  const inputsDir = path.resolve("inputs");
+  const urlsPath = path.join(inputsDir, "urls.json");
+  if (!fs.existsSync(urlsPath)) throw new Error("Missing inputs/urls.json. Provide URL list or run crawl first.");
 
   const { urls } = JSON.parse(fs.readFileSync(urlsPath, "utf-8")) as { urls: string[] };
 

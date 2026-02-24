@@ -29,10 +29,11 @@ function parseCsv(s: string): string[] {
 async function main() {
   const cfg = readIni();
   const outputDir = path.resolve(String(cfg.global?.output_dir ?? "./output"));
+  const inputsDir = path.resolve("inputs");
   const includeTags = parseCsv(String(cfg["task.axe_scan"]?.include ?? "wcag2a,wcag2aa"));
 
-  const urlsPath = path.join(outputDir, "urls.json");
-  if (!fs.existsSync(urlsPath)) throw new Error("Missing output/urls.json. Run crawl first.");
+  const urlsPath = path.join(inputsDir, "urls.json");
+  if (!fs.existsSync(urlsPath)) throw new Error("Missing inputs/urls.json. Provide URL list or run crawl first.");
 
   const { urls } = JSON.parse(fs.readFileSync(urlsPath, "utf-8")) as { urls: string[] };
 

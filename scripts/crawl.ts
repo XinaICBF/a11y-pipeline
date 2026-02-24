@@ -70,8 +70,9 @@ async function main() {
   }
 
   await browser.close();
-
-  const outPath = path.join(outputDir, "urls.json");
+  const inputsDir = path.resolve("inputs");
+  ensureDir(inputsDir);
+  const outPath = path.join(inputsDir, "urls.json");
   fs.writeFileSync(outPath, JSON.stringify({ baseUrl, urls: discovered }, null, 2), "utf-8");
   console.log(`Wrote ${discovered.length} urls to ${outPath}`);
 }
