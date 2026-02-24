@@ -6,7 +6,8 @@
     "run": "node --loader ts-node/esm run-task.ts",
     "run:all": "node --loader ts-node/esm run-task.ts --all",
     "reset": "node --loader ts-node/esm run-task.ts --reset",
-    "pw:install": "npx playwright install --with-deps"
+    "pw:install": "npx playwright install --with-deps",
+    "axe:debug": "node --loader ts-node/esm --inspect-brk scripts/axe-scan.ts"
   },
   "dependencies": {
     "@axe-core/playwright": "^4.10.2",
